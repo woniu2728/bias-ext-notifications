@@ -1,0 +1,2 @@
+[bias.extensions]
+notifications = bias_ext_notifications.backend.ext:extend
