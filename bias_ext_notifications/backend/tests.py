@@ -16,9 +16,9 @@ from bias_core.extensions.runtime import (
     get_runtime_discussion_state_model,
 )
 from bias_core.extensions import ResourceEndpointDefinition
-from extensions.testing import ResourceRegistry, get_resource_registry
+from bias_core.testing import ResourceRegistry, get_resource_registry
 from bias_core.settings_service import clear_runtime_setting_caches
-from extensions.testing import ExtensionRuntimeTestMixin
+from bias_core.testing import ExtensionRuntimeTestMixin
 from bias_ext_notifications.backend.services import NotificationService
 from bias_ext_notifications.backend.ext import notification_resource_endpoints
 from bias_core.extensions.runtime import get_runtime_notification_model
@@ -717,7 +717,7 @@ class NotificationServiceTests(TestCase):
         )
 
         with patch("bias_ext_notifications.backend.handlers.get_runtime_resource_registry", return_value=registry):
-            with patch("apps.core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
+            with patch("bias_core.resource_dispatcher.get_runtime_resource_registry", return_value=registry):
                 response = self.client.get(
                     f"/api/notifications/{notification.id}",
                     **self.auth_header(self.author),
@@ -926,6 +926,8 @@ class NotificationExtensionDiagnosticsTests(ExtensionRuntimeTestMixin, TestCase)
         self.assertEqual(item["current_app_label"], "notifications")
         self.assertEqual(item["target_app_label"], "notifications")
         self.assertEqual(item["migration_risk"], "none")
+
+
 
 
 
