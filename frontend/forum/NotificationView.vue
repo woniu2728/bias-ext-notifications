@@ -196,7 +196,7 @@ import {
   ForumStateBlock,
   useComposerStore,
   useForumStore
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { DiscussionListSidebarStartButton } from '@bias/discussions'
 import NotificationList from './NotificationList.vue'
 import { useNotificationViewModel } from './useNotificationViewModel.js'

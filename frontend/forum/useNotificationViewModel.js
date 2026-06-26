@@ -4,7 +4,7 @@ import {
   formatRelativeTime } from '@bias/core'
 import { useStartDiscussionAction } from '@bias/discussions'
 import { getUiCopy
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { getUserAvatarColor, getUserDisplayName, getUserInitial } from '@bias/users'
 import {
   getNotificationIconClass,

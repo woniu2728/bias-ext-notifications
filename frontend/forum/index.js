@@ -1,5 +1,5 @@
 import { ResourceNormalizer } from '@bias/core'
-import { extendForum } from '@bias/forum'
+import { extendForum } from '@bias/core/forum'
 import { normalizeUser } from '@bias/users'
 import NotificationHeaderItem from './NotificationHeaderItem.vue'
 import { useNotificationStore } from './store.js'

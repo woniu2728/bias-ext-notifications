@@ -43,7 +43,7 @@ import {
   getNotificationTextHtml,
   } from './notificationRuntime.js'
 import { useForumStore
-} from '@bias/forum'
+} from '@bias/core/forum'
 
 import { useHeaderNotifications } from './useHeaderNotifications.js'
 import { useNotificationStore } from './store.js'

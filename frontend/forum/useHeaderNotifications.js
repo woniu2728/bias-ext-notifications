@@ -2,7 +2,7 @@ import {
   getEmptyState,
   getStateBlock,
   getUiCopy
-} from '@bias/forum'
+} from '@bias/core/forum'
 import { ref } from '@bias/core'
 import {
   getNotificationPresentationModel,
