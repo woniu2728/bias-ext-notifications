@@ -21,5 +21,8 @@
   "extra": {
     "auto_install": true,
     "auto_enable": true
+  },
+  "security": {
+    "capabilities_notice": "Notification delivery extension; stores user notification records and exposes notification preferences and views."
   }
 }
