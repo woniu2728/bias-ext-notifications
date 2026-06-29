@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from bias_core.extensions import ResourceEndpointDefinition
+
+from bias_ext_notifications.backend.constants import EXTENSION_ID
+from bias_ext_notifications.backend.handlers import (
+    dispatch_notification_delete,
+    dispatch_notification_delete_all_read,
+    dispatch_notification_delete_filtered_read,
+    dispatch_notification_index,
+    dispatch_notification_mark_all_read,
+    dispatch_notification_mark_filtered_read,
+    dispatch_notification_mark_read,
+    dispatch_notification_show,
+    dispatch_notification_stats,
+)
+
+
+def notification_resource_endpoints():
+    return (
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="index",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_index,
+            methods=("GET",),
+            path="notifications",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="stats",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_stats,
+            methods=("GET",),
+            path="notifications/stats",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="clear-read",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_delete_all_read,
+            methods=("DELETE",),
+            path="notifications/read/clear",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="clear-filtered-read",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_delete_filtered_read,
+            methods=("DELETE",),
+            path="notifications/read/clear-filtered",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="read",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_mark_read,
+            methods=("POST",),
+            path="notifications/{object_id}/read",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="read-all",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_mark_all_read,
+            methods=("POST",),
+            path="notifications/read-all",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="read-filtered",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_mark_filtered_read,
+            methods=("POST",),
+            path="notifications/read-filtered",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="show",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_show,
+            methods=("GET",),
+            path="notifications/{object_id}",
+            absolute_path=True,
+            auth_required=True,
+        ),
+        ResourceEndpointDefinition(
+            resource="notification",
+            endpoint="delete",
+            module_id=EXTENSION_ID,
+            handler=dispatch_notification_delete,
+            methods=("DELETE",),
+            path="notifications/{object_id}",
+            absolute_path=True,
+            auth_required=True,
+        ),
+    )

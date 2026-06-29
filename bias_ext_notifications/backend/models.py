@@ -21,6 +21,7 @@ class Notification(models.Model):
     data = models.JSONField(default=dict, blank=True)
     is_read = models.BooleanField(default=False, db_index=True)
     read_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -30,6 +31,7 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=["user"], name="notificatio_user_id_e78525_idx"),
             models.Index(fields=["user", "is_read"], name="notificatio_user_id_a4dd5c_idx"),
+            models.Index(fields=["user", "is_deleted"], name="notificatio_user_id_7f1d1b_idx"),
             models.Index(fields=["created_at"], name="notificatio_created_e4c995_idx"),
             models.Index(fields=["subject_type", "subject_id"], name="notificatio_subject_ba2cbf_idx"),
         ]

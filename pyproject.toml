@@ -2,8 +2,10 @@
 name = "bias-ext-notifications"
 version = "0.1.0"
 dependencies = ["bias-core>=0.1,<0.2"]
+
 [project.entry-points."bias.extensions"]
 notifications = "bias_ext_notifications.backend.ext:extend"
+
 [tool.setuptools]
 include-package-data = true
 
@@ -13,5 +15,38 @@ include = ["bias_ext_notifications*"]
 
 [tool.setuptools.data-files]
 "bias_extensions/notifications" = ["extension.json"]
-"bias_extensions/notifications/frontend/forum" = ["frontend/forum/HeaderNotificationsMenu.vue", "frontend/forum/index.js", "frontend/forum/NotificationCard.vue", "frontend/forum/notificationFrontendRegistry.js", "frontend/forum/NotificationHeaderItem.vue", "frontend/forum/NotificationList.vue", "frontend/forum/notificationMeta.js", "frontend/forum/notificationMeta.test.js", "frontend/forum/notificationRuntime.js", "frontend/forum/NotificationView.vue", "frontend/forum/sdk.d.ts", "frontend/forum/sdk.js", "frontend/forum/store.js", "frontend/forum/useHeaderNotificationActions.js", "frontend/forum/useHeaderNotificationActions.test.js", "frontend/forum/useHeaderNotificationDisplayState.js", "frontend/forum/useHeaderNotificationDisplayState.test.js", "frontend/forum/useHeaderNotifications.js", "frontend/forum/useNotificationBulkActions.js", "frontend/forum/useNotificationBulkActions.test.js", "frontend/forum/useNotificationDisplayState.js", "frontend/forum/useNotificationDisplayState.test.js", "frontend/forum/useNotificationItemActions.js", "frontend/forum/useNotificationItemActions.test.js", "frontend/forum/useNotificationLoadState.js", "frontend/forum/useNotificationLoadState.test.js", "frontend/forum/useNotificationPage.js", "frontend/forum/useNotificationRouteActions.js", "frontend/forum/useNotificationRouteActions.test.js", "frontend/forum/useNotificationRouteState.js", "frontend/forum/useNotificationViewBindings.js", "frontend/forum/useNotificationViewBindings.test.js", "frontend/forum/useNotificationViewModel.js"]
-
+"bias_extensions/notifications/frontend/forum" = [
+  "frontend/forum/HeaderNotificationsMenu.vue",
+  "frontend/forum/NotificationCard.vue",
+  "frontend/forum/NotificationHeaderItem.vue",
+  "frontend/forum/NotificationList.vue",
+  "frontend/forum/NotificationView.vue",
+  "frontend/forum/index.js",
+  "frontend/forum/notificationFrontendRegistry.js",
+  "frontend/forum/notificationMeta.js",
+  "frontend/forum/notificationMeta.test.js",
+  "frontend/forum/notificationRuntime.js",
+  "frontend/forum/sdk.d.ts",
+  "frontend/forum/sdk.js",
+  "frontend/forum/store.js",
+  "frontend/forum/useHeaderNotificationActions.js",
+  "frontend/forum/useHeaderNotificationActions.test.js",
+  "frontend/forum/useHeaderNotificationDisplayState.js",
+  "frontend/forum/useHeaderNotificationDisplayState.test.js",
+  "frontend/forum/useHeaderNotifications.js",
+  "frontend/forum/useNotificationBulkActions.js",
+  "frontend/forum/useNotificationBulkActions.test.js",
+  "frontend/forum/useNotificationDisplayState.js",
+  "frontend/forum/useNotificationDisplayState.test.js",
+  "frontend/forum/useNotificationItemActions.js",
+  "frontend/forum/useNotificationItemActions.test.js",
+  "frontend/forum/useNotificationLoadState.js",
+  "frontend/forum/useNotificationLoadState.test.js",
+  "frontend/forum/useNotificationPage.js",
+  "frontend/forum/useNotificationRouteActions.js",
+  "frontend/forum/useNotificationRouteActions.test.js",
+  "frontend/forum/useNotificationRouteState.js",
+  "frontend/forum/useNotificationViewBindings.js",
+  "frontend/forum/useNotificationViewBindings.test.js",
+  "frontend/forum/useNotificationViewModel.js",
+]

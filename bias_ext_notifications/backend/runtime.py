@@ -4,10 +4,12 @@ from typing import Any
 
 from bias_core.extensions.runtime import (
     delete_runtime_discussion_reply_notifications_for_post,
+    delete_runtime_notifications,
     get_runtime_notification_model,
     get_runtime_notification_service,
     notify_runtime_notification,
 )
+from bias_core.extensions.notifications import NotificationBlueprint
 
 
 def _runtime_service_method(service: Any, name: str):
@@ -26,19 +28,44 @@ def notification_service_provider() -> dict:
 
     return {
         "model": Notification,
+        "event_types": notification_event_type_aliases(),
         "notify_discussion_reply": NotificationService.notify_discussion_reply,
         "notify_discussion_approved": NotificationService.notify_discussion_approved,
+        "notify_discussion_approved_from_event": NotificationService.notify_discussion_approved_from_event,
         "notify_discussion_rejected": NotificationService.notify_discussion_rejected,
+        "notify_discussion_rejected_from_event": NotificationService.notify_discussion_rejected_from_event,
         "notify_post_approved": NotificationService.notify_post_approved,
+        "notify_post_approved_from_event": NotificationService.notify_post_approved_from_event,
         "notify_post_rejected": NotificationService.notify_post_rejected,
+        "notify_post_rejected_from_event": NotificationService.notify_post_rejected_from_event,
+        "notify_post_reply_from_event": NotificationService.notify_post_reply_from_event,
         "notify_post_liked": NotificationService.notify_post_liked,
+        "notify_post_liked_from_event": NotificationService.notify_post_liked_from_event,
+        "delete_post_liked_for_post_user": NotificationService.delete_post_liked_for_post_user,
         "notify_user_mentioned": NotificationService.notify_user_mentioned,
+        "notify_user_mentioned_from_event": NotificationService.notify_user_mentioned_from_event,
+        "create_from_blueprint": NotificationService.create_from_blueprint,
+        "sync_notifications": NotificationService.sync_notifications,
+        "delete_matching_notifications": NotificationService.delete_matching_notifications,
+        "delete_post_reply_for_post": NotificationService.delete_post_reply_for_post,
+        "delete_user_mentioned_for_post": NotificationService.delete_user_mentioned_for_post,
         "dispatch_batch": dispatch_notification_batch,
         "send_batch": _send_notification_batch_now,
         "load_realtime_notifications": NotificationService.load_notifications_for_realtime,
         "serialize_realtime_notification": serialize_realtime_notification,
         "delete_discussion_reply_for_post": _delete_discussion_reply_for_post,
     }
+
+
+def notification_event_type_aliases() -> dict[str, type]:
+    from bias_ext_notifications.backend.events import NotificationCreatedEvent
+
+    return {
+        "notifications.notification.created": NotificationCreatedEvent,
+    }
+
+
+notification_service_provider.event_types = notification_event_type_aliases
 
 
 def get_notification_service(default: Any = None):
@@ -100,12 +127,11 @@ def serialize_realtime_notification(notification) -> dict:
 
 
 def _delete_discussion_reply_for_post(post_id: int) -> int:
-    from bias_ext_notifications.backend.models import Notification
     from bias_ext_notifications.backend.services import NotificationService
 
-    deleted_count, _ = Notification.objects.filter(
-        type=NotificationService.TYPE_DISCUSSION_REPLY,
-        data__post_id=post_id,
-    ).delete()
-    return deleted_count
-
+    return delete_runtime_notifications(
+        blueprint=NotificationBlueprint(
+            type=NotificationService.TYPE_DISCUSSION_REPLY,
+            match_data={"post_id": post_id},
+        ),
+    )

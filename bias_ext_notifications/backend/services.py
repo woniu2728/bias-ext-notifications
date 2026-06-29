@@ -5,16 +5,13 @@ from typing import Any, Optional, List, Tuple
 from django.db.models import Q, Count
 from django.core.cache import cache
 from django.utils import timezone
+from bias_core.extensions.notifications import NotificationBlueprint
 from bias_core.extensions.platform import dispatch_forum_event_after_commit
 from bias_core.extensions.runtime import (
     get_runtime_discussion_reply_notification_context,
 )
 from bias_ext_notifications.backend.events import NotificationCreatedEvent
 from bias_ext_notifications.backend.models import Notification
-from bias_core.extensions.runtime import (
-    get_runtime_post_notification_context,
-    get_runtime_post_reply_notification_context,
-)
 from bias_core.extensions.runtime import (
     get_runtime_user_preference,
 )
@@ -44,7 +41,7 @@ class NotificationService:
         if not user:
             return False
 
-        from bias_core.extensions.forum import get_forum_registry
+        from bias_core.extensions.platform import get_forum_registry
 
         definition = get_forum_registry().get_notification_type(type_code)
         if not definition or not definition.preference_key:
@@ -114,6 +111,7 @@ class NotificationService:
                 subject_type=subject_type,
                 subject_id=subject_id,
                 is_read=False,
+                is_deleted=False,
             ).first()
 
         if existing:
@@ -139,6 +137,23 @@ class NotificationService:
         return notification
 
     @staticmethod
+    def create_from_blueprint(
+        *,
+        blueprint: NotificationBlueprint,
+        recipient: Any,
+        allow_merge: bool = True,
+    ) -> Notification:
+        return NotificationService.create_notification(
+            user=recipient,
+            type=blueprint.type,
+            from_user=blueprint.from_user,
+            subject_type=blueprint.subject_type,
+            subject_id=blueprint.subject_id,
+            data=dict(blueprint.data or {}),
+            allow_merge=allow_merge,
+        )
+
+    @staticmethod
     def create_notifications_bulk(notifications: List[Notification]) -> List[Notification]:
         if not notifications:
             return []
@@ -149,6 +164,168 @@ class NotificationService:
         return created
 
     @staticmethod
+    def sync_notifications(
+        *,
+        recipients: List[Any],
+        blueprint: NotificationBlueprint | None = None,
+        type: str | None = None,
+        from_user: Optional[Any] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[int] = None,
+        data: Optional[dict] = None,
+        match_data: Optional[dict] = None,
+    ) -> dict:
+        blueprint = NotificationService._resolve_blueprint(
+            blueprint,
+            type=type,
+            from_user=from_user,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            data=data,
+            match_data=match_data,
+        )
+        payload = dict(blueprint.data or {})
+        recipient_map = {}
+        from_user_id = getattr(blueprint.from_user, "id", None)
+        for recipient in recipients or []:
+            recipient_id = getattr(recipient, "id", None)
+            if not recipient_id or recipient_id == from_user_id:
+                continue
+            if not NotificationService.is_notification_enabled(recipient, blueprint.type):
+                continue
+            recipient_map[int(recipient_id)] = recipient
+
+        queryset = Notification.objects.filter(
+            type=blueprint.type,
+            subject_type=blueprint.subject_type,
+            subject_id=blueprint.subject_id,
+        )
+        for key, value in dict(blueprint.match_data or {}).items():
+            queryset = queryset.filter(**{f"data__{key}": value})
+
+        existing = list(queryset.select_related("user"))
+        existing_by_user_id = {item.user_id: item for item in existing}
+        recipient_ids = set(recipient_map)
+        visible_existing_ids = {
+            item.user_id
+            for item in existing
+            if not item.is_deleted
+        }
+
+        to_delete_ids = [
+            item.id
+            for item in existing
+            if item.user_id not in recipient_ids and not item.is_deleted
+        ]
+        if to_delete_ids:
+            Notification.objects.filter(id__in=to_delete_ids).update(is_deleted=True)
+
+        restored = []
+        touched_user_ids = [item.user_id for item in existing if item.id in to_delete_ids]
+        for user_id, recipient in recipient_map.items():
+            existing_notification = existing_by_user_id.get(user_id)
+            if existing_notification is None:
+                continue
+
+            update_fields = []
+            if existing_notification.is_deleted:
+                existing_notification.is_deleted = False
+                update_fields.append("is_deleted")
+            if existing_notification.from_user_id != from_user_id:
+                existing_notification.from_user = blueprint.from_user
+                update_fields.append("from_user")
+            if existing_notification.data != payload:
+                existing_notification.data = payload
+                update_fields.append("data")
+            if update_fields:
+                existing_notification.save(update_fields=update_fields)
+                restored.append(existing_notification)
+                touched_user_ids.append(user_id)
+
+        new_notifications = [
+            Notification(
+                user=recipient,
+                from_user=blueprint.from_user,
+                type=blueprint.type,
+                subject_type=blueprint.subject_type,
+                subject_id=blueprint.subject_id,
+                data=payload,
+            )
+            for user_id, recipient in recipient_map.items()
+            if user_id not in existing_by_user_id
+        ]
+        created = NotificationService.create_notifications_bulk(new_notifications)
+
+        changed_user_ids = set(touched_user_ids)
+        changed_user_ids.update(item.user_id for item in created)
+        NotificationService.invalidate_unread_counts(list(changed_user_ids))
+
+        return {
+            "created": created,
+            "restored": restored,
+            "deleted_count": len(to_delete_ids),
+            "visible_recipient_ids_before": visible_existing_ids,
+            "visible_recipient_ids_after": recipient_ids,
+        }
+
+    @staticmethod
+    def delete_matching_notifications(
+        *,
+        blueprint: NotificationBlueprint | None = None,
+        type: str | None = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[int] = None,
+        match_data: Optional[dict] = None,
+    ) -> int:
+        blueprint = NotificationService._resolve_blueprint(
+            blueprint,
+            type=type,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            match_data=match_data,
+        )
+        queryset = Notification.objects.filter(
+            type=blueprint.type,
+            is_deleted=False,
+        )
+        if blueprint.subject_type is not None:
+            queryset = queryset.filter(subject_type=blueprint.subject_type)
+        if blueprint.subject_id is not None:
+            queryset = queryset.filter(subject_id=blueprint.subject_id)
+        for key, value in dict(blueprint.match_data or {}).items():
+            queryset = queryset.filter(**{f"data__{key}": value})
+
+        user_ids = list(queryset.values_list("user_id", flat=True).distinct())
+        count = queryset.update(is_deleted=True)
+        if count:
+            NotificationService.invalidate_unread_counts(user_ids)
+        return count
+
+    @staticmethod
+    def _resolve_blueprint(
+        blueprint: NotificationBlueprint | None = None,
+        *,
+        type: str | None = None,
+        from_user: Optional[Any] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[int] = None,
+        data: Optional[dict] = None,
+        match_data: Optional[dict] = None,
+    ) -> NotificationBlueprint:
+        if blueprint is not None:
+            return blueprint
+        if not type:
+            raise ValueError("通知同步需要 type 或 NotificationBlueprint")
+        return NotificationBlueprint(
+            type=type,
+            from_user=from_user,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            data=dict(data or {}),
+            match_data=dict(match_data or {}),
+        )
+
+    @staticmethod
     def _dispatch_notifications_after_commit(notification_ids: List[int]):
         if not notification_ids:
             return
@@ -156,6 +333,24 @@ class NotificationService:
         dispatch_forum_event_after_commit(
             NotificationCreatedEvent(notification_ids=tuple(int(item) for item in notification_ids if item)),
         )
+
+    @staticmethod
+    def _get_post_reply_notification_context(reply_to_post_id: int, post_id: int, from_user: Any):
+        try:
+            from bias_core.extensions.runtime import get_runtime_post_reply_notification_context
+
+            return get_runtime_post_reply_notification_context(reply_to_post_id, post_id, from_user)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _get_post_notification_context(post_id: int):
+        try:
+            from bias_core.extensions.runtime import get_runtime_post_notification_context
+
+            return get_runtime_post_notification_context(post_id)
+        except Exception:
+            return None
 
     @staticmethod
     def _collect_type_counts(queryset) -> dict:
@@ -171,7 +366,7 @@ class NotificationService:
         type: Optional[str] = None,
         discussion_id: Optional[int] = None,
     ):
-        queryset = Notification.objects.filter(user=user)
+        queryset = Notification.objects.filter(user=user, is_deleted=False)
 
         if is_read is not None:
             queryset = queryset.filter(is_read=is_read)
@@ -209,7 +404,7 @@ class NotificationService:
         Returns:
             Tuple[List[Notification], int, int, dict, dict]: (通知列表, 总数, 未读数, 各类型总数, 各类型未读数)
         """
-        base_queryset = Notification.objects.filter(user=user)
+        base_queryset = Notification.objects.filter(user=user, is_deleted=False)
         queryset = NotificationService._build_filtered_queryset(
             user=user,
             is_read=is_read,
@@ -247,7 +442,7 @@ class NotificationService:
             Optional[Notification]: 通知对象
         """
         try:
-            queryset = Notification.objects.filter(user=user)
+            queryset = Notification.objects.filter(user=user, is_deleted=False)
             if preload is not None:
                 queryset = preload(queryset)
             notification = queryset.get(id=notification_id)
@@ -268,7 +463,7 @@ class NotificationService:
             bool: 是否成功
         """
         try:
-            notification = Notification.objects.get(id=notification_id, user=user)
+            notification = Notification.objects.get(id=notification_id, user=user, is_deleted=False)
             was_unread = not notification.is_read
             notification.mark_as_read()
             if was_unread:
@@ -329,9 +524,10 @@ class NotificationService:
             bool: 是否成功
         """
         try:
-            notification = Notification.objects.get(id=notification_id, user=user)
+            notification = Notification.objects.get(id=notification_id, user=user, is_deleted=False)
             was_unread = not notification.is_read
-            notification.delete()
+            notification.is_deleted = True
+            notification.save(update_fields=["is_deleted"])
             if was_unread:
                 NotificationService.invalidate_unread_count(user.id)
             return True
@@ -369,7 +565,9 @@ class NotificationService:
         if not type_counts:
             return 0, {}
 
-        count, _ = queryset.delete()
+        count = queryset.update(is_deleted=True)
+        if count:
+            NotificationService.invalidate_unread_count(user.id)
         return count, type_counts
 
     @staticmethod
@@ -392,7 +590,7 @@ class NotificationService:
         if cached is not None:
             return int(cached)
 
-        unread_count = Notification.objects.filter(user=user, is_read=False).count()
+        unread_count = Notification.objects.filter(user=user, is_read=False, is_deleted=False).count()
         try:
             cache.set(cache_key, unread_count, UNREAD_COUNT_CACHE_TIMEOUT)
         except Exception:
@@ -410,7 +608,7 @@ class NotificationService:
         Returns:
             dict: 统计数据
         """
-        total = Notification.objects.filter(user=user).count()
+        total = Notification.objects.filter(user=user, is_deleted=False).count()
         unread_count = NotificationService.get_unread_count(user)
         read_count = total - unread_count
 
@@ -435,33 +633,25 @@ class NotificationService:
             return
 
         payload = dict(context.get("payload") or {})
-        notifications = []
+        recipients = []
         discussion_author = context.get("discussion_author")
         if discussion_author and discussion_author.id != getattr(from_user, "id", None):
-            notifications.append(
-                Notification(
-                    user=discussion_author,
-                    from_user=from_user,
-                    type=NotificationService.TYPE_DISCUSSION_REPLY,
-                    subject_type='discussion',
-                    subject_id=discussion_id,
-                    data=payload,
-                )
-            )
+            recipients.append(discussion_author)
 
         for subscriber in context.get("subscribers") or ():
-            if NotificationService.is_notification_enabled(subscriber, NotificationService.TYPE_DISCUSSION_REPLY):
-                notifications.append(
-                    Notification(
-                        user=subscriber,
-                        from_user=from_user,
-                        type=NotificationService.TYPE_DISCUSSION_REPLY,
-                        subject_type='discussion',
-                        subject_id=discussion_id,
-                        data=payload,
-                    )
-                )
-        NotificationService.create_notifications_bulk(notifications)
+            recipients.append(subscriber)
+
+        NotificationService.sync_notifications(
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_DISCUSSION_REPLY,
+                from_user=from_user,
+                subject_type='discussion',
+                subject_id=discussion_id,
+                data=payload,
+                match_data={"post_id": post_id},
+            ),
+            recipients=recipients,
+        )
 
     @staticmethod
     def notify_post_reply(reply_to_post_id: int, post_id: int, from_user: Any):
@@ -473,18 +663,67 @@ class NotificationService:
             post_id: 新回复帖子ID
             from_user: 回复者
         """
-        context = get_runtime_post_reply_notification_context(reply_to_post_id, post_id, from_user)
+        context = NotificationService._get_post_reply_notification_context(reply_to_post_id, post_id, from_user)
         if not context:
             return
 
-        NotificationService.create_notification(
-            user=context["recipient"],
-            type=NotificationService.TYPE_POST_REPLY,
-            from_user=from_user,
-            subject_type='post',
-            subject_id=reply_to_post_id,
+        NotificationService.create_from_blueprint(
+            recipient=context["recipient"],
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_POST_REPLY,
+                from_user=from_user,
+                subject_type='post',
+                subject_id=reply_to_post_id,
+                data=dict(context.get("payload") or {}),
+            ),
             allow_merge=False,
-            data=dict(context.get("payload") or {}),
+        )
+
+    @staticmethod
+    def notify_post_reply_from_event(event: Any, from_user: Any):
+        recipient_id = int(getattr(event, "reply_to_post_user_id", 0) or 0)
+        from_user_id = int(getattr(from_user, "id", 0) or 0)
+        discussion_user_id = int(getattr(event, "discussion_user_id", 0) or 0)
+        if not recipient_id or recipient_id in {from_user_id, discussion_user_id}:
+            return None
+
+        from bias_core.extensions.runtime import get_runtime_user_by_id
+
+        try:
+            recipient = get_runtime_user_by_id(recipient_id)
+        except Exception:
+            return None
+        if recipient is None:
+            return None
+
+        reply_to_post_id = int(getattr(event, "reply_to_post_id", 0) or 0)
+        payload = {
+            "post_id": int(getattr(event, "post_id", 0) or 0),
+            "post_number": getattr(event, "post_number", None),
+            "discussion_id": getattr(event, "discussion_id", None),
+            "discussion_title": getattr(event, "discussion_title", "") or "",
+            "reply_to_post_id": reply_to_post_id,
+            "reply_to_post_number": getattr(event, "reply_to_post_number", None),
+        }
+        return NotificationService.create_from_blueprint(
+            recipient=recipient,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_POST_REPLY,
+                from_user=from_user,
+                subject_type='post',
+                subject_id=reply_to_post_id,
+                data=payload,
+            ),
+            allow_merge=False,
+        )
+
+    @staticmethod
+    def delete_post_reply_for_post(post_id: int) -> int:
+        return NotificationService.delete_matching_notifications(
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_POST_REPLY,
+                match_data={"post_id": post_id},
+            ),
         )
 
     @staticmethod
@@ -496,20 +735,89 @@ class NotificationService:
             post_id: 帖子ID
             from_user: 点赞者
         """
-        context = get_runtime_post_notification_context(post_id)
+        context = NotificationService._get_post_notification_context(post_id)
         if not context:
             return
 
         author = context.get("author")
         if author and author.id != getattr(from_user, "id", None):
-            NotificationService.create_notification(
-                user=author,
+            payload = dict(context.get("payload") or {})
+            payload["from_user_id"] = getattr(from_user, "id", None)
+            NotificationService.sync_notifications(
+                blueprint=NotificationBlueprint(
+                    type=NotificationService.TYPE_POST_LIKED,
+                    from_user=from_user,
+                    subject_type='post',
+                    subject_id=post_id,
+                    data=payload,
+                    match_data={"post_id": post_id, "from_user_id": getattr(from_user, "id", None)},
+                ),
+                recipients=[author],
+            )
+
+    @staticmethod
+    def notify_post_liked_from_event(event: Any, from_user: Any):
+        post_user_id = int(getattr(event, "post_user_id", 0) or 0)
+        from_user_id = int(getattr(from_user, "id", 0) or 0)
+        if not post_user_id or post_user_id == from_user_id:
+            return None
+
+        from bias_core.extensions.runtime import get_runtime_user_by_id
+
+        try:
+            author = get_runtime_user_by_id(post_user_id)
+        except Exception:
+            return None
+        if author is None:
+            return None
+
+        post_id = int(getattr(event, "post_id", 0) or 0)
+        payload = {
+            "post_id": post_id,
+            "post_number": getattr(event, "post_number", None),
+            "discussion_id": getattr(event, "discussion_id", None),
+            "discussion_title": getattr(event, "discussion_title", "") or "",
+            "from_user_id": from_user_id,
+        }
+        return NotificationService.sync_notifications(
+            blueprint=NotificationBlueprint(
                 type=NotificationService.TYPE_POST_LIKED,
                 from_user=from_user,
                 subject_type='post',
                 subject_id=post_id,
-                data=dict(context.get("payload") or {}),
-            )
+                data=payload,
+                match_data={"post_id": post_id, "from_user_id": from_user_id},
+            ),
+            recipients=[author],
+        )
+
+    @staticmethod
+    def delete_post_liked_for_post_user(post_id: int, from_user: Any) -> int:
+        from_user_id = getattr(from_user, "id", None)
+        deleted_count = NotificationService.delete_matching_notifications(
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_POST_LIKED,
+                subject_type='post',
+                subject_id=post_id,
+                match_data={"post_id": post_id, "from_user_id": from_user_id},
+            ),
+        )
+        legacy_count = Notification.objects.filter(
+            type=NotificationService.TYPE_POST_LIKED,
+            subject_type='post',
+            subject_id=post_id,
+            from_user_id=from_user_id,
+            is_deleted=False,
+        ).exclude(data__has_key="from_user_id").update(is_deleted=True)
+        if legacy_count:
+            user_ids = list(Notification.objects.filter(
+                type=NotificationService.TYPE_POST_LIKED,
+                subject_type='post',
+                subject_id=post_id,
+                from_user_id=from_user_id,
+            ).values_list("user_id", flat=True).distinct())
+            NotificationService.invalidate_unread_counts(user_ids)
+        return int(deleted_count or 0) + int(legacy_count or 0)
 
     @staticmethod
     def notify_user_mentioned(post_id: int, mentioned_user: Any, from_user: Any):
@@ -521,35 +829,108 @@ class NotificationService:
             mentioned_user: 被提及的用户
             from_user: 提及者
         """
-        context = get_runtime_post_notification_context(post_id)
+        context = NotificationService._get_post_notification_context(post_id)
         if not context:
             return
 
-        NotificationService.create_notification(
-            user=mentioned_user,
+        payload = dict(context.get("payload") or {})
+        payload["mentioned_user_id"] = getattr(mentioned_user, "id", None)
+        NotificationService.create_from_blueprint(
+            recipient=mentioned_user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_USER_MENTIONED,
+                from_user=from_user,
+                subject_type='post',
+                subject_id=post_id,
+                data=payload,
+            ),
+        )
+
+    @staticmethod
+    def notify_user_mentioned_from_event(event: Any, mentioned_user: Any, from_user: Any):
+        payload = {
+            "post_id": int(getattr(event, "post_id", 0) or 0),
+            "post_number": getattr(event, "post_number", None),
+            "discussion_id": getattr(event, "discussion_id", None),
+            "discussion_title": getattr(event, "discussion_title", "") or "",
+            "mentioned_user_id": getattr(mentioned_user, "id", None),
+        }
+        return NotificationService.create_from_blueprint(
+            recipient=mentioned_user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_USER_MENTIONED,
+                from_user=from_user,
+                subject_type='post',
+                subject_id=payload["post_id"],
+                data=payload,
+            ),
+        )
+
+    @staticmethod
+    def delete_user_mentioned_for_post(
+        post_id: int,
+        mentioned_user: Any | None = None,
+        mentioned_user_id: int | None = None,
+    ) -> int:
+        resolved_user_id = mentioned_user_id or getattr(mentioned_user, "id", None)
+        if resolved_user_id is None:
+            return NotificationService.delete_matching_notifications(
+                blueprint=NotificationBlueprint(
+                    type=NotificationService.TYPE_USER_MENTIONED,
+                    subject_type='post',
+                    subject_id=post_id,
+                    match_data={"post_id": post_id},
+                ),
+            )
+
+        deleted_count = NotificationService.delete_matching_notifications(
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_USER_MENTIONED,
+                subject_type='post',
+                subject_id=post_id,
+                match_data={"post_id": post_id, "mentioned_user_id": resolved_user_id},
+            ),
+        )
+        legacy_queryset = Notification.objects.filter(
+            user_id=resolved_user_id,
             type=NotificationService.TYPE_USER_MENTIONED,
-            from_user=from_user,
             subject_type='post',
             subject_id=post_id,
-            data=dict(context.get("payload") or {}),
-        )
+            is_deleted=False,
+        ).exclude(data__has_key="mentioned_user_id")
+        user_ids = list(legacy_queryset.values_list("user_id", flat=True).distinct())
+        legacy_count = legacy_queryset.update(is_deleted=True)
+        if legacy_count:
+            NotificationService.invalidate_unread_counts(user_ids)
+        return int(deleted_count or 0) + int(legacy_count or 0)
 
     @staticmethod
     def notify_discussion_approved(discussion, admin_user: Any, note: str = ""):
         if not getattr(discussion, "user", None):
             return
 
-        NotificationService.create_notification(
-            user=discussion.user,
-            type=NotificationService.TYPE_DISCUSSION_APPROVED,
-            from_user=admin_user,
-            subject_type='discussion',
-            subject_id=discussion.id,
-            data={
-                'discussion_id': discussion.id,
-                'discussion_title': discussion.title,
-                'approval_note': note or "",
-            }
+        NotificationService.create_from_blueprint(
+            recipient=discussion.user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_DISCUSSION_APPROVED,
+                from_user=admin_user,
+                subject_type='discussion',
+                subject_id=discussion.id,
+                data={
+                    'discussion_id': discussion.id,
+                    'discussion_title': discussion.title,
+                    'approval_note': note or "",
+                },
+            ),
+        )
+
+    @staticmethod
+    def notify_discussion_approved_from_event(event: Any, admin_user: Any, note: str = ""):
+        return NotificationService._notify_discussion_approval_from_event(
+            event,
+            admin_user,
+            type_code=NotificationService.TYPE_DISCUSSION_APPROVED,
+            note=note,
         )
 
     @staticmethod
@@ -557,17 +938,59 @@ class NotificationService:
         if not getattr(discussion, "user", None):
             return
 
-        NotificationService.create_notification(
-            user=discussion.user,
-            type=NotificationService.TYPE_DISCUSSION_REJECTED,
-            from_user=admin_user,
-            subject_type='discussion',
-            subject_id=discussion.id,
-            data={
-                'discussion_id': discussion.id,
-                'discussion_title': discussion.title,
-                'approval_note': note or "",
-            }
+        NotificationService.create_from_blueprint(
+            recipient=discussion.user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_DISCUSSION_REJECTED,
+                from_user=admin_user,
+                subject_type='discussion',
+                subject_id=discussion.id,
+                data={
+                    'discussion_id': discussion.id,
+                    'discussion_title': discussion.title,
+                    'approval_note': note or "",
+                },
+            ),
+        )
+
+    @staticmethod
+    def notify_discussion_rejected_from_event(event: Any, admin_user: Any, note: str = ""):
+        return NotificationService._notify_discussion_approval_from_event(
+            event,
+            admin_user,
+            type_code=NotificationService.TYPE_DISCUSSION_REJECTED,
+            note=note,
+        )
+
+    @staticmethod
+    def _notify_discussion_approval_from_event(event: Any, admin_user: Any, *, type_code: str, note: str = ""):
+        author_id = int(getattr(event, "actor_user_id", 0) or 0)
+        if not author_id:
+            return None
+
+        from bias_core.extensions.runtime import get_runtime_user_by_id
+
+        try:
+            author = get_runtime_user_by_id(author_id)
+        except Exception:
+            return None
+        if author is None:
+            return None
+
+        discussion_id = int(getattr(event, "discussion_id", 0) or 0)
+        return NotificationService.create_from_blueprint(
+            recipient=author,
+            blueprint=NotificationBlueprint(
+                type=type_code,
+                from_user=admin_user,
+                subject_type='discussion',
+                subject_id=discussion_id,
+                data={
+                    'discussion_id': discussion_id,
+                    'discussion_title': getattr(event, "discussion_title", "") or "",
+                    'approval_note': note or "",
+                },
+            ),
         )
 
     @staticmethod
@@ -575,19 +998,30 @@ class NotificationService:
         if not getattr(post, "user", None):
             return
 
-        NotificationService.create_notification(
-            user=post.user,
-            type=NotificationService.TYPE_POST_APPROVED,
-            from_user=admin_user,
-            subject_type='post',
-            subject_id=post.id,
-            data={
-                'discussion_id': post.discussion_id,
-                'discussion_title': post.discussion.title if getattr(post, "discussion", None) else "",
-                'post_id': post.id,
-                'post_number': post.number,
-                'approval_note': note or "",
-            }
+        NotificationService.create_from_blueprint(
+            recipient=post.user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_POST_APPROVED,
+                from_user=admin_user,
+                subject_type='post',
+                subject_id=post.id,
+                data={
+                    'discussion_id': post.discussion_id,
+                    'discussion_title': post.discussion.title if getattr(post, "discussion", None) else "",
+                    'post_id': post.id,
+                    'post_number': post.number,
+                    'approval_note': note or "",
+                },
+            ),
+        )
+
+    @staticmethod
+    def notify_post_approved_from_event(event: Any, admin_user: Any, note: str = ""):
+        return NotificationService._notify_post_approval_from_event(
+            event,
+            admin_user,
+            type_code=NotificationService.TYPE_POST_APPROVED,
+            note=note,
         )
 
     @staticmethod
@@ -595,55 +1029,102 @@ class NotificationService:
         if not getattr(post, "user", None):
             return
 
-        NotificationService.create_notification(
-            user=post.user,
-            type=NotificationService.TYPE_POST_REJECTED,
-            from_user=admin_user,
-            subject_type='post',
-            subject_id=post.id,
-            data={
-                'discussion_id': post.discussion_id,
-                'discussion_title': post.discussion.title if getattr(post, "discussion", None) else "",
-                'post_id': post.id,
-                'post_number': post.number,
-                'approval_note': note or "",
-            }
+        NotificationService.create_from_blueprint(
+            recipient=post.user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_POST_REJECTED,
+                from_user=admin_user,
+                subject_type='post',
+                subject_id=post.id,
+                data={
+                    'discussion_id': post.discussion_id,
+                    'discussion_title': post.discussion.title if getattr(post, "discussion", None) else "",
+                    'post_id': post.id,
+                    'post_number': post.number,
+                    'approval_note': note or "",
+                },
+            ),
+        )
+
+    @staticmethod
+    def notify_post_rejected_from_event(event: Any, admin_user: Any, note: str = ""):
+        return NotificationService._notify_post_approval_from_event(
+            event,
+            admin_user,
+            type_code=NotificationService.TYPE_POST_REJECTED,
+            note=note,
+        )
+
+    @staticmethod
+    def _notify_post_approval_from_event(event: Any, admin_user: Any, *, type_code: str, note: str = ""):
+        author_id = int(getattr(event, "actor_user_id", 0) or 0)
+        if not author_id:
+            return None
+
+        from bias_core.extensions.runtime import get_runtime_user_by_id
+
+        try:
+            author = get_runtime_user_by_id(author_id)
+        except Exception:
+            return None
+        if author is None:
+            return None
+
+        post_id = int(getattr(event, "post_id", 0) or 0)
+        return NotificationService.create_from_blueprint(
+            recipient=author,
+            blueprint=NotificationBlueprint(
+                type=type_code,
+                from_user=admin_user,
+                subject_type='post',
+                subject_id=post_id,
+                data={
+                    'discussion_id': getattr(event, "discussion_id", None),
+                    'discussion_title': getattr(event, "discussion_title", "") or "",
+                    'post_id': post_id,
+                    'post_number': getattr(event, "post_number", None),
+                    'approval_note': note or "",
+                },
+            ),
         )
 
     @staticmethod
     def notify_user_suspended(user: Any, admin_user: Optional[Any] = None):
-        NotificationService.create_notification(
-            user=user,
-            type=NotificationService.TYPE_USER_SUSPENDED,
-            from_user=admin_user,
-            subject_type='user',
-            subject_id=user.id,
-            data={
-                'suspended_until': user.suspended_until.isoformat() if user.suspended_until else None,
-                'suspend_reason': user.suspend_reason or "",
-                'suspend_message': user.suspend_message or "",
-            }
+        NotificationService.create_from_blueprint(
+            recipient=user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_USER_SUSPENDED,
+                from_user=admin_user,
+                subject_type='user',
+                subject_id=user.id,
+                data={
+                    'suspended_until': user.suspended_until.isoformat() if user.suspended_until else None,
+                    'suspend_reason': user.suspend_reason or "",
+                    'suspend_message': user.suspend_message or "",
+                },
+            ),
         )
 
     @staticmethod
     def notify_user_unsuspended(user: Any, admin_user: Optional[Any] = None):
-        NotificationService.create_notification(
-            user=user,
-            type=NotificationService.TYPE_USER_UNSUSPENDED,
-            from_user=admin_user,
-            subject_type='user',
-            subject_id=user.id,
-            data={}
+        NotificationService.create_from_blueprint(
+            recipient=user,
+            blueprint=NotificationBlueprint(
+                type=NotificationService.TYPE_USER_UNSUSPENDED,
+                from_user=admin_user,
+                subject_type='user',
+                subject_id=user.id,
+                data={},
+            ),
         )
 
-    @staticmethod
     @staticmethod
     def load_notifications_for_realtime(notification_ids: List[int]):
         if not notification_ids:
             return []
 
         notifications = list(
-            Notification.objects.filter(id__in=notification_ids).select_related('from_user')
+            Notification.objects.filter(id__in=notification_ids, is_deleted=False).select_related('from_user')
         )
         notification_map = {notification.id: notification for notification in notifications}
         return [
@@ -651,4 +1132,3 @@ class NotificationService:
             for notification_id in notification_ids
             if notification_id in notification_map
         ]
-

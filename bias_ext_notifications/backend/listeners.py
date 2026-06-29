@@ -14,11 +14,22 @@ def handle_post_created_direct_reply_notification(event) -> None:
     if from_user is None:
         return
 
-    NotificationService.notify_post_reply(
-        reply_to_post_id=event.reply_to_post_id,
-        post_id=event.post_id,
-        from_user=from_user,
-    )
+    NotificationService.notify_post_reply_from_event(event, from_user)
+
+
+def handle_post_hidden_direct_reply_notification_cleanup(event) -> None:
+    if not getattr(event, "is_hidden", False):
+        return
+
+    from bias_ext_notifications.backend.services import NotificationService
+
+    NotificationService.delete_post_reply_for_post(event.post_id)
+
+
+def handle_post_deleted_direct_reply_notification_cleanup(event) -> None:
+    from bias_ext_notifications.backend.services import NotificationService
+
+    NotificationService.delete_post_reply_for_post(event.post_id)
 
 
 def handle_user_suspended_notification(event) -> None:
