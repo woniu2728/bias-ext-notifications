@@ -2,14 +2,39 @@ from __future__ import annotations
 
 from typing import Any
 
-from bias_core.extensions.runtime import (
-    delete_runtime_discussion_reply_notifications_for_post,
-    delete_runtime_notifications,
-    get_runtime_notification_model,
-    get_runtime_notification_service,
-    notify_runtime_notification,
-)
 from bias_core.extensions.notifications import NotificationBlueprint
+
+
+def delete_runtime_discussion_reply_notifications_for_post(*args, **kwargs):
+    from bias_core.extensions.runtime import (
+        delete_runtime_discussion_reply_notifications_for_post as runtime_delete_discussion_reply_notifications_for_post,
+    )
+
+    return runtime_delete_discussion_reply_notifications_for_post(*args, **kwargs)
+
+
+def delete_runtime_notifications(*args, **kwargs):
+    from bias_core.extensions.runtime import delete_runtime_notifications as runtime_delete_notifications
+
+    return runtime_delete_notifications(*args, **kwargs)
+
+
+def get_runtime_notification_model(*args, **kwargs):
+    from bias_core.extensions.runtime import get_runtime_notification_model as runtime_get_notification_model
+
+    return runtime_get_notification_model(*args, **kwargs)
+
+
+def get_runtime_notification_service(*args, **kwargs):
+    from bias_core.extensions.runtime import get_runtime_notification_service as runtime_get_notification_service
+
+    return runtime_get_notification_service(*args, **kwargs)
+
+
+def notify_runtime_notification(*args, **kwargs):
+    from bias_core.extensions.runtime import notify_runtime_notification as runtime_notify_notification
+
+    return runtime_notify_notification(*args, **kwargs)
 
 
 def _runtime_service_method(service: Any, name: str):

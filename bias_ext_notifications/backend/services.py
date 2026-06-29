@@ -7,14 +7,22 @@ from django.core.cache import cache
 from django.utils import timezone
 from bias_core.extensions.notifications import NotificationBlueprint
 from bias_core.extensions.platform import dispatch_forum_event_after_commit
-from bias_core.extensions.runtime import (
-    get_runtime_discussion_reply_notification_context,
-)
 from bias_ext_notifications.backend.events import NotificationCreatedEvent
 from bias_ext_notifications.backend.models import Notification
-from bias_core.extensions.runtime import (
-    get_runtime_user_preference,
-)
+
+
+def get_runtime_discussion_reply_notification_context(*args, **kwargs):
+    from bias_core.extensions.runtime import (
+        get_runtime_discussion_reply_notification_context as runtime_get_discussion_reply_notification_context,
+    )
+
+    return runtime_get_discussion_reply_notification_context(*args, **kwargs)
+
+
+def get_runtime_user_preference(*args, **kwargs):
+    from bias_core.extensions.runtime import get_runtime_user_preference as runtime_get_user_preference
+
+    return runtime_get_user_preference(*args, **kwargs)
 
 
 UNREAD_COUNT_CACHE_KEY = "notifications.unread_count.{user_id}"

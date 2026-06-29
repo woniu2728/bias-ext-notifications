@@ -5,10 +5,15 @@ from bias_core.extensions import (
     ResourceFieldDefinition,
     ResourceRelationshipDefinition,
 )
-from bias_core.extensions.runtime import serialize_runtime_user
 
 
 EXTENSION_ID = "notifications"
+
+
+def serialize_runtime_user(*args, **kwargs):
+    from bias_core.extensions.runtime import serialize_runtime_user as runtime_serialize_user
+
+    return runtime_serialize_user(*args, **kwargs)
 
 
 def notification_resource_definitions():

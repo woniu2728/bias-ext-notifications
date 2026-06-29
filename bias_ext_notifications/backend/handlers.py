@@ -3,10 +3,15 @@ from __future__ import annotations
 from typing import Optional
 
 from bias_core.extensions.platform import api_error
-from bias_core.extensions.runtime import get_runtime_resource_registry
 from bias_core.extensions.platform import ResourceQueryOptions, parse_resource_query_options
 from bias_core.extensions.platform import PaginationService
 from bias_ext_notifications.backend.services import NotificationService
+
+
+def get_runtime_resource_registry(*args, **kwargs):
+    from bias_core.extensions.runtime import get_runtime_resource_registry as runtime_get_resource_registry
+
+    return runtime_get_resource_registry(*args, **kwargs)
 
 
 def _get_resource_registry():

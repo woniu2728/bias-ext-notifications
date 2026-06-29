@@ -10,10 +10,6 @@ from ninja_jwt.tokens import RefreshToken
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from bias_core.extensions.runtime import (
-    create_runtime_discussion,
-    get_runtime_discussion_state_model,
-)
 from bias_core.extensions.notifications import NotificationBlueprint
 from bias_core.extensions import ResourceEndpointDefinition
 from bias_core.extensions.testing import (
@@ -27,20 +23,60 @@ from bias_core.extensions.testing import (
 )
 from bias_ext_notifications.backend.services import NotificationService
 from bias_ext_notifications.backend.resource_contracts import notification_resource_endpoints
-from bias_core.extensions.runtime import get_runtime_notification_model
-from bias_core.extensions.runtime import (
-    create_runtime_notification,
-    create_runtime_post,
-    delete_runtime_notifications,
-    delete_runtime_post,
-    like_runtime_post,
-    set_runtime_post_hidden_state,
-    sync_runtime_notifications,
-    unlike_runtime_post,
-)
-from bias_core.extensions.runtime import (
-    get_runtime_user_model,
-)
+
+
+def _runtime_facade(name: str):
+    from importlib import import_module
+
+    return getattr(import_module("bias_core.extensions.runtime"), name)
+
+
+def create_runtime_discussion(*args, **kwargs):
+    return _runtime_facade("create_runtime_discussion")(*args, **kwargs)
+
+
+def get_runtime_discussion_state_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_discussion_state_model")(*args, **kwargs)
+
+
+def get_runtime_notification_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_notification_model")(*args, **kwargs)
+
+
+def create_runtime_notification(*args, **kwargs):
+    return _runtime_facade("create_runtime_notification")(*args, **kwargs)
+
+
+def create_runtime_post(*args, **kwargs):
+    return _runtime_facade("create_runtime_post")(*args, **kwargs)
+
+
+def delete_runtime_notifications(*args, **kwargs):
+    return _runtime_facade("delete_runtime_notifications")(*args, **kwargs)
+
+
+def delete_runtime_post(*args, **kwargs):
+    return _runtime_facade("delete_runtime_post")(*args, **kwargs)
+
+
+def like_runtime_post(*args, **kwargs):
+    return _runtime_facade("like_runtime_post")(*args, **kwargs)
+
+
+def set_runtime_post_hidden_state(*args, **kwargs):
+    return _runtime_facade("set_runtime_post_hidden_state")(*args, **kwargs)
+
+
+def sync_runtime_notifications(*args, **kwargs):
+    return _runtime_facade("sync_runtime_notifications")(*args, **kwargs)
+
+
+def unlike_runtime_post(*args, **kwargs):
+    return _runtime_facade("unlike_runtime_post")(*args, **kwargs)
+
+
+def get_runtime_user_model(*args, **kwargs):
+    return _runtime_facade("get_runtime_user_model")(*args, **kwargs)
 
 
 class RuntimeModelProxy:

@@ -1,4 +1,7 @@
-from bias_core.extensions.runtime import get_runtime_user_by_id
+def get_runtime_user_by_id(*args, **kwargs):
+    from bias_core.extensions.runtime import get_runtime_user_by_id as runtime_get_user_by_id
+
+    return runtime_get_user_by_id(*args, **kwargs)
 
 
 def handle_post_created_direct_reply_notification(event) -> None:
