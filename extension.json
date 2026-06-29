@@ -10,6 +10,10 @@
     "core",
     "users"
   ],
+  "optional_dependencies": [
+    "discussions",
+    "posts"
+  ],
   "django": {
     "app_config": "bias_ext_notifications.backend.apps.NotificationsExtensionConfig",
     "app_label": "notifications",
