@@ -129,9 +129,21 @@ def dispatch_notification_batch(notification_ids):
 
 
 def _send_notification_batch_now(notification_ids):
-    from bias_ext_notifications.backend.services import NotificationService
+    return deliver_notification_batch(notification_ids or [])
 
-    return NotificationService.load_notifications_for_realtime(notification_ids or [])
+
+def deliver_notification_batch(notification_ids):
+    from bias_ext_notifications.backend.services import NotificationService
+    from bias_ext_notifications.backend.mail import send_notification_batch_email
+
+    loaded = NotificationService.load_notifications_for_realtime(notification_ids or [])
+    sent_email_ids = send_notification_batch_email([notification.id for notification in loaded])
+    return {
+        "notification_ids": [notification.id for notification in loaded],
+        "email_notification_ids": sent_email_ids,
+        "realtime_count": len(loaded),
+        "email_count": len(sent_email_ids),
+    }
 
 
 def serialize_realtime_notification(notification) -> dict:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from bias_core.extensions import ExtensionEventListenerDefinition
 
 from bias_ext_notifications.backend.listeners import (
+    handle_notification_created_delivery,
     handle_post_created_direct_reply_notification,
     handle_post_deleted_direct_reply_notification_cleanup,
     handle_post_hidden_direct_reply_notification_cleanup,
@@ -13,6 +14,11 @@ from bias_ext_notifications.backend.listeners import (
 
 def notification_event_listener_definitions():
     return (
+        ExtensionEventListenerDefinition(
+            event_type="notifications.notification.created",
+            handler=handle_notification_created_delivery,
+            description="通知创建后派发实时与邮件投递批次。",
+        ),
         ExtensionEventListenerDefinition(
             event_type="users.user.suspended",
             handler=handle_user_suspended_notification,

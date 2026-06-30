@@ -2,6 +2,7 @@ import json
 from io import StringIO
 
 from django.core.cache import cache
+from django.core import mail
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -24,6 +25,8 @@ from bias_core.extensions.testing import (
 )
 from bias_ext_notifications.backend.services import NotificationService
 from bias_ext_notifications.backend.resource_contracts import notification_resource_endpoints
+from bias_ext_notifications.backend.runtime import deliver_notification_batch
+from bias_ext_notifications.backend.tasks import dispatch_notification_batch
 
 
 def _runtime_facade(name: str):
@@ -99,6 +102,32 @@ def notification_model():
     return get_runtime_notification_model()
 
 
+def discussion_tags_payload(tag_ids):
+    return {
+        "data": {
+            "relationships": {
+                "tags": {
+                    "data": [
+                        {"type": "tag", "id": str(tag_id)}
+                        for tag_id in tag_ids
+                    ],
+                },
+            },
+        },
+    }
+
+
+def create_test_tag():
+    from bias_ext_tags.backend.models import Tag
+
+    return Tag.objects.create(
+        name="Notification Tests",
+        slug="notification-tests",
+        position=1,
+        is_primary=True,
+    )
+
+
 class RuntimeNotificationModel:
     @property
     def objects(self):
@@ -143,11 +172,13 @@ class NotificationServiceTests(TestCase):
             email="notification-admin@example.com",
             password="password123",
         )
+        self.tag = create_test_tag()
 
         self.discussion = create_runtime_discussion(
             title="Notification discussion",
             content="Initial post",
             user=self.author,
+            extension_payload=discussion_tags_payload([self.tag.id]),
         )
         with self.captureOnCommitCallbacks(execute=True):
             self.initial_reply = create_runtime_post(
@@ -155,6 +186,7 @@ class NotificationServiceTests(TestCase):
                 content="First reply",
                 user=self.participant,
             )
+        mail.outbox = []
 
     def tearDown(self):
         clear_runtime_setting_caches()
@@ -756,6 +788,39 @@ class NotificationServiceTests(TestCase):
         self.assertTrue(set(created_notifications.values_list("id", flat=True)).issubset(dispatched_ids))
 
     @override_settings(CELERY_BROKER_URL="redis://localhost:6379/1")
+    def test_notification_created_event_listener_dispatches_delivery_batch_to_queue(self):
+        Setting.objects.update_or_create(
+            key="advanced.queue_enabled",
+            defaults={"value": "true"},
+        )
+        Setting.objects.update_or_create(
+            key="advanced.queue_driver",
+            defaults={"value": '"redis"'},
+        )
+        clear_runtime_setting_caches()
+
+        with patch("bias_ext_notifications.backend.tasks.dispatch_notification_batch.delay") as delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                notification = NotificationService.create_from_blueprint(
+                    recipient=self.author,
+                    blueprint=NotificationBlueprint(
+                        type="postReply",
+                        from_user=self.replier,
+                        subject_type="post",
+                        subject_id=self.initial_reply.id,
+                        data={
+                            "discussion_id": self.discussion.id,
+                            "discussion_title": self.discussion.title,
+                            "post_id": self.initial_reply.id,
+                            "post_number": self.initial_reply.number,
+                        },
+                    ),
+                    allow_merge=False,
+                )
+
+        delay.assert_called_once_with([notification.id])
+
+    @override_settings(CELERY_BROKER_URL="redis://localhost:6379/1")
     def test_bulk_notifications_expose_realtime_batch_loader_when_task_enqueue_fails(self):
         Setting.objects.update_or_create(
             key="advanced.queue_enabled",
@@ -774,7 +839,10 @@ class NotificationServiceTests(TestCase):
             type="discussionReply",
             subject_type="discussion",
             subject_id=self.discussion.id,
-            data={"discussion_id": self.discussion.id},
+            data={
+                "discussion_id": self.discussion.id,
+                "discussion_title": self.discussion.title,
+            },
         )
         second = NotificationModel(
             user=self.participant,
@@ -782,7 +850,10 @@ class NotificationServiceTests(TestCase):
             type="discussionReply",
             subject_type="discussion",
             subject_id=self.discussion.id,
-            data={"discussion_id": self.discussion.id},
+            data={
+                "discussion_id": self.discussion.id,
+                "discussion_title": self.discussion.title,
+            },
         )
 
         with patch("bias_ext_notifications.backend.tasks.dispatch_notification_batch.delay", side_effect=RuntimeError("queue down")):
@@ -790,8 +861,61 @@ class NotificationServiceTests(TestCase):
                 created = NotificationService.create_notifications_bulk([first, second])
 
         self.assertEqual(len(created), 2)
-        loaded = NotificationService.load_notifications_for_realtime([item.id for item in created])
-        self.assertEqual([item.id for item in loaded], [item.id for item in created])
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(
+            [message.to for message in mail.outbox],
+            [[self.author.email], [self.participant.email]],
+        )
+        self.assertTrue(all("Notification discussion" in message.body for message in mail.outbox))
+
+    def test_dispatch_notification_batch_task_sends_notification_mail(self):
+        notification = Notification.objects.create(
+            user=self.author,
+            from_user=self.replier,
+            type="postReply",
+            subject_type="post",
+            subject_id=self.initial_reply.id,
+            data={
+                "discussion_id": self.discussion.id,
+                "discussion_title": self.discussion.title,
+                "post_id": self.initial_reply.id,
+                "post_number": self.initial_reply.number,
+            },
+        )
+
+        result = dispatch_notification_batch.run([notification.id])
+
+        self.assertEqual(result["notification_ids"], [notification.id])
+        self.assertEqual(result["email_notification_ids"], [notification.id])
+        self.assertEqual(result["realtime_count"], 1)
+        self.assertEqual(result["email_count"], 1)
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, [self.author.email])
+        self.assertIn("[Bias]", message.subject)
+        self.assertIn("你的回复收到回应", message.subject)
+        self.assertIn("replier 回复了你在 《Notification discussion》 中的帖子。", message.body)
+        self.assertIn("http://localhost:5173/d/", message.body)
+
+    def test_deliver_notification_batch_skips_users_without_email(self):
+        self.author.email = ""
+        self.author.save(update_fields=["email"])
+        notification = Notification.objects.create(
+            user=self.author,
+            from_user=self.replier,
+            type="userUnsuspended",
+            subject_type="user",
+            subject_id=self.author.id,
+            data={},
+        )
+
+        result = deliver_notification_batch([notification.id])
+
+        self.assertEqual(result["notification_ids"], [notification.id])
+        self.assertEqual(result["email_notification_ids"], [])
+        self.assertEqual(result["realtime_count"], 1)
+        self.assertEqual(result["email_count"], 0)
+        self.assertEqual(len(mail.outbox), 0)
 
     def auth_header(self, user):
         token = RefreshToken.for_user(user).access_token
@@ -874,6 +998,7 @@ class NotificationServiceTests(TestCase):
             title="Another discussion",
             content="Seed content",
             user=self.author,
+            extension_payload=discussion_tags_payload([self.tag.id]),
         )
         matching = Notification.objects.create(
             user=self.author,
@@ -1418,7 +1543,7 @@ class NotificationExtensionDiagnosticsTests(ExtensionRuntimeTestMixin, TestCase)
             if item.module_id == "notifications"
         }
 
-        self.assertIsNone(application.get_service("posts.service"))
+        self.assertIsNotNone(application.get_service("posts.service"))
         self.assertIsNotNone(application.get_service("content.posts"))
         self.assertIn("handle_post_created_direct_reply_notification", listener_names)
         self.assertIn("handle_post_hidden_direct_reply_notification_cleanup", listener_names)
@@ -1440,7 +1565,7 @@ class NotificationExtensionDiagnosticsTests(ExtensionRuntimeTestMixin, TestCase)
         }
 
         self.assertIsNotNone(application.get_service("content.posts"))
-        self.assertIsNone(application.get_service("posts.service"))
+        self.assertIsNotNone(application.get_service("posts.service"))
         self.assertIn("handle_post_created_direct_reply_notification", listener_names)
         self.assertIn("handle_post_hidden_direct_reply_notification_cleanup", listener_names)
         self.assertIn("handle_post_deleted_direct_reply_notification_cleanup", listener_names)

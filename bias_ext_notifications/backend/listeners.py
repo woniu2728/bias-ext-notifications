@@ -35,6 +35,12 @@ def handle_post_deleted_direct_reply_notification_cleanup(event) -> None:
     NotificationService.delete_post_reply_for_post(event.post_id)
 
 
+def handle_notification_created_delivery(event) -> None:
+    from bias_ext_notifications.backend.runtime import dispatch_runtime_notification_batch
+
+    dispatch_runtime_notification_batch(getattr(event, "notification_ids", ()))
+
+
 def handle_user_suspended_notification(event) -> None:
     from bias_ext_notifications.backend.services import NotificationService
 

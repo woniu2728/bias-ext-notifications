@@ -116,6 +116,7 @@ def service_extenders():
                 "notify_post_rejected",
                 "notify_user_mentioned",
                 "serialize_realtime_notification",
+                "send_batch",
             ),
         ),
         LifecycleExtender(),
