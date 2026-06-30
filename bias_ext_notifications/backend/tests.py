@@ -16,6 +16,7 @@ from bias_core.extensions.testing import (
     ExtensionRuntimeTestMixin,
     ResourceRegistry,
     Setting,
+    assert_runtime_service_contracts,
     build_extension_test_host,
     clear_runtime_setting_caches,
     get_forum_registry,
@@ -1375,6 +1376,7 @@ class NotificationExtensionDiagnosticsTests(ExtensionRuntimeTestMixin, TestCase)
         application = self.bootstrap_extensions("notifications")
         service = application.get_service("notifications.service")
 
+        assert_runtime_service_contracts(application, "notifications", "notifications.service")
         self.assertIn("notifications.service", application.get_service_provider_keys(extension_id="notifications"))
         self.assertEqual(service["model"].__name__, "Notification")
         for key in (
