@@ -50,3 +50,6 @@ include = ["bias_ext_notifications*"]
   "frontend/forum/useNotificationViewBindings.test.js",
   "frontend/forum/useNotificationViewModel.js",
 ]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "bias_core.extension_test_settings"
