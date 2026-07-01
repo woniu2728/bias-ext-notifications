@@ -1,7 +1,11 @@
 [project]
 name = "bias-ext-notifications"
 version = "0.1.0"
-dependencies = ["bias-core>=0.1,<0.2"]
+dependencies = [
+  "bias-core>=0.1,<0.2",
+  "bias-content>=0.1,<0.2",
+  "bias-ext-users>=0.1,<0.2",
+]
 
 [project.entry-points."bias.extensions"]
 notifications = "bias_ext_notifications.backend.ext:extend"
@@ -51,5 +55,5 @@ include = ["bias_ext_notifications*"]
   "frontend/forum/useNotificationViewModel.js",
 ]
 
-[tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "bias_core.extension_test_settings"
+[tool.pytest."ini_options"]
+"DJANGO_SETTINGS_MODULE" = "bias_core.extension_test_settings"

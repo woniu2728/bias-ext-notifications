@@ -10,12 +10,6 @@ from bias_core.extensions import (
 EXTENSION_ID = "notifications"
 
 
-def serialize_runtime_user(*args, **kwargs):
-    from bias_core.extensions.runtime import serialize_runtime_user as runtime_serialize_user
-
-    return runtime_serialize_user(*args, **kwargs)
-
-
 def notification_resource_definitions():
     return (notification_resource_definition(),)
 
@@ -72,6 +66,11 @@ def serialize_notification_base(notification, context: dict) -> dict:
 
 
 def resolve_notification_from_user(notification, context: dict) -> dict | None:
-    return serialize_runtime_user(getattr(notification, "from_user", None), resource="user_summary", context=context)
+    user = getattr(notification, "from_user", None)
+    if not user:
+        return None
+    from bias_core.extensions.runtime import get_runtime_resource_registry
+
+    return get_runtime_resource_registry().serialize("user_summary", user, context)
 
 

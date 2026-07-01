@@ -147,16 +147,14 @@ def deliver_notification_batch(notification_ids):
 
 
 def serialize_realtime_notification(notification) -> dict:
-    from bias_core.extensions.runtime import serialize_runtime_user
+    from bias_core.extensions.runtime import get_runtime_resource_registry
+
+    user = getattr(notification, "from_user", None)
 
     return {
         "id": notification.id,
         "type": notification.type,
-        "from_user": serialize_runtime_user(
-            getattr(notification, "from_user", None),
-            resource="user_summary",
-            context={},
-        ),
+        "from_user": get_runtime_resource_registry().serialize("user_summary", user, {}) if user else None,
         "data": notification.data,
         "is_read": notification.is_read,
         "created_at": notification.created_at.isoformat() if notification.created_at else None,

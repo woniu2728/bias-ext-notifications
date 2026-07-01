@@ -24,6 +24,34 @@
     "auto_install": true,
     "auto_enable": true
   },
+  "performance_contracts": [
+    {
+      "name": "notification_pagination_indexes",
+      "message": "notification list has pagination and required indexes.",
+      "required_indexes": [
+        [
+          "user"
+        ],
+        [
+          "user",
+          "is_read"
+        ],
+        [
+          "user",
+          "is_deleted"
+        ],
+        [
+          "created_at"
+        ],
+        [
+          "subject_type",
+          "subject_id"
+        ]
+      ],
+      "missing_indexes": [],
+      "pagination": "page/limit normalized by PaginationService"
+    }
+  ],
   "security": {
     "capabilities_notice": "Notification delivery extension; stores user notification records and exposes notification preferences and views."
   }

@@ -1,7 +1,7 @@
-def get_runtime_user_by_id(*args, **kwargs):
-    from bias_core.extensions.runtime import get_runtime_user_by_id as runtime_get_user_by_id
+def get_user_service():
+    from bias_core.extensions.runtime import get_runtime_service
 
-    return runtime_get_user_by_id(*args, **kwargs)
+    return get_runtime_service("users.service")
 
 
 def handle_post_created_direct_reply_notification(event) -> None:
@@ -71,6 +71,16 @@ def handle_user_unsuspended_notification(event) -> None:
 
 def _resolve_user_or_none(user_id: int):
     try:
-        return get_runtime_user_by_id(user_id)
+        return _service_method(get_user_service(), "get_by_id")(user_id)
     except Exception:
         return None
+
+
+def _service_method(service, name: str):
+    if isinstance(service, dict):
+        method = service.get(name)
+    else:
+        method = getattr(service, name, None)
+    if not callable(method):
+        raise RuntimeError(f"Notifications 扩展运行时服务缺少方法: {name}")
+    return method

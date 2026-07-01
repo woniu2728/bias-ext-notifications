@@ -11,18 +11,54 @@ from bias_ext_notifications.backend.events import NotificationCreatedEvent
 from bias_ext_notifications.backend.models import Notification
 
 
-def get_runtime_discussion_reply_notification_context(*args, **kwargs):
-    from bias_core.extensions.runtime import (
-        get_runtime_discussion_reply_notification_context as runtime_get_discussion_reply_notification_context,
+def _get_runtime_service(service_key: str, default=None):
+    from bias_core.extensions.runtime import get_runtime_service
+
+    return get_runtime_service(service_key, default)
+
+
+def _runtime_service_method(service_key: str, name: str):
+    service = _get_runtime_service(service_key)
+    if isinstance(service, dict):
+        method = service.get(name)
+    else:
+        method = getattr(service, name, None)
+    if not callable(method):
+        raise RuntimeError(f"Notifications 扩展运行时服务缺少方法: {service_key}.{name}")
+    return method
+
+
+def _get_user_by_id(user_id: int):
+    return _runtime_service_method("users.service", "get_by_id")(user_id)
+
+
+def _get_user_preference(user, key: str, *, fallback=False):
+    get_preference = _runtime_service_method("users.service", "get_preference")
+    try:
+        return get_preference(user, key, fallback=fallback)
+    except TypeError:
+        value = get_preference(user, key)
+        return fallback if value is None else value
+
+
+def _discussion_reply_context(discussion_id: int, post_id: int, from_user: Any):
+    return _runtime_service_method("content.discussions", "reply_notification_context")(
+        discussion_id,
+        post_id,
+        from_user,
     )
 
-    return runtime_get_discussion_reply_notification_context(*args, **kwargs)
+
+def _post_reply_context(reply_to_post_id: int, post_id: int, from_user: Any):
+    return _runtime_service_method("content.posts", "reply_notification_context")(
+        reply_to_post_id,
+        post_id,
+        from_user,
+    )
 
 
-def get_runtime_user_preference(*args, **kwargs):
-    from bias_core.extensions.runtime import get_runtime_user_preference as runtime_get_user_preference
-
-    return runtime_get_user_preference(*args, **kwargs)
+def _post_context(post_id: int):
+    return _runtime_service_method("content.posts", "notification_context")(post_id)
 
 
 UNREAD_COUNT_CACHE_KEY = "notifications.unread_count.{user_id}"
@@ -55,7 +91,7 @@ class NotificationService:
         if not definition or not definition.preference_key:
             return True
 
-        return get_runtime_user_preference(
+        return _get_user_preference(
             user,
             definition.preference_key,
             fallback=definition.preference_default_enabled,
@@ -345,18 +381,14 @@ class NotificationService:
     @staticmethod
     def _get_post_reply_notification_context(reply_to_post_id: int, post_id: int, from_user: Any):
         try:
-            from bias_core.extensions.runtime import get_runtime_post_reply_notification_context
-
-            return get_runtime_post_reply_notification_context(reply_to_post_id, post_id, from_user)
+            return _post_reply_context(reply_to_post_id, post_id, from_user)
         except Exception:
             return None
 
     @staticmethod
     def _get_post_notification_context(post_id: int):
         try:
-            from bias_core.extensions.runtime import get_runtime_post_notification_context
-
-            return get_runtime_post_notification_context(post_id)
+            return _post_context(post_id)
         except Exception:
             return None
 
@@ -636,7 +668,7 @@ class NotificationService:
             post_id: 帖子ID
             from_user: 回复者
         """
-        context = get_runtime_discussion_reply_notification_context(discussion_id, post_id, from_user)
+        context = _discussion_reply_context(discussion_id, post_id, from_user)
         if not context:
             return
 
@@ -695,10 +727,8 @@ class NotificationService:
         if not recipient_id or recipient_id in {from_user_id, discussion_user_id}:
             return None
 
-        from bias_core.extensions.runtime import get_runtime_user_by_id
-
         try:
-            recipient = get_runtime_user_by_id(recipient_id)
+            recipient = _get_user_by_id(recipient_id)
         except Exception:
             return None
         if recipient is None:
@@ -770,10 +800,8 @@ class NotificationService:
         if not post_user_id or post_user_id == from_user_id:
             return None
 
-        from bias_core.extensions.runtime import get_runtime_user_by_id
-
         try:
-            author = get_runtime_user_by_id(post_user_id)
+            author = _get_user_by_id(post_user_id)
         except Exception:
             return None
         if author is None:
@@ -976,10 +1004,8 @@ class NotificationService:
         if not author_id:
             return None
 
-        from bias_core.extensions.runtime import get_runtime_user_by_id
-
         try:
-            author = get_runtime_user_by_id(author_id)
+            author = _get_user_by_id(author_id)
         except Exception:
             return None
         if author is None:
@@ -1069,10 +1095,8 @@ class NotificationService:
         if not author_id:
             return None
 
-        from bias_core.extensions.runtime import get_runtime_user_by_id
-
         try:
-            author = get_runtime_user_by_id(author_id)
+            author = _get_user_by_id(author_id)
         except Exception:
             return None
         if author is None:
